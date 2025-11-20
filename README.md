@@ -8,7 +8,7 @@ Detta verktyg:
 * hittar namn, personnummer och telefonnummer automatiskt
 * låter dig granska och justera innan pseudonymisering
 * kräver **ingen** molnkoppling eller konto
-* kör **Gemma 3 12B modellen helt lokalt**
+* kör **Gemma 3 4B modellen helt lokalt**
 
 ---
 
@@ -45,7 +45,7 @@ Dubbelklicka på `.exe`-filen.
 Första gången kan Ollama behöva ladda modellen:
 
 ```
-gemma3:12b
+gemma3:4b
 ```
 
 Den är stor och kan ta några minuter att "värma upp".
