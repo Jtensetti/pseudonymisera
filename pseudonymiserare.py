@@ -12,7 +12,7 @@ import gradio as gr
 import uvicorn
 from docx import Document
 
-OLLAMA_MODEL = "gemma3:12b"
+OLLAMA_MODEL = "gemma3:4b"
 
 # -------------------------
 # Hjälpfunktioner: konsol-wait
