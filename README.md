@@ -4,7 +4,7 @@
 
 Detta verktyg:
 
-* läser `.txt` eller `.docx`
+* läser `.txt`, `.docx` eller `.pdf`
 * hittar namn, personnummer och telefonnummer automatiskt
 * låter dig granska och justera innan pseudonymisering
 * kräver **ingen** molnkoppling eller konto
