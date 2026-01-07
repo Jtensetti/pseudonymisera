@@ -529,22 +529,72 @@ def extract_text_from_content(content, ext):
     return str(content)
 
 
-def call_ollama_extract(text, model=OLLAMA_MODEL):
+def split_text_into_chunks(text, chunk_size=10000, overlap=500):
     """
-    Anropar Ollama för att:
-    - hitta personer och alla sätt de omnämns på
-    - hitta personnummer/födelsedatum
-    - hitta telefonnummer
+    Dela upp text i överlappande bitar för att hantera långa dokument.
+    Försöker bryta vid radslut för att inte klippa mitt i en mening.
+    """
+    if len(text) <= chunk_size:
+        return [text]
 
-    Returnerar ett dict:
-    {
-      "persons": [...],
-      "personnummer": [...],
-      "phones": [...]
-    }
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+
+        if end >= len(text):
+            # Sista chunken
+            chunks.append(text[start:])
+            break
+
+        # Försök hitta en bra brytpunkt (radslut) nära slutet
+        break_point = text.rfind('\n', start + chunk_size - overlap, end)
+        if break_point == -1:
+            break_point = end
+
+        chunks.append(text[start:break_point])
+
+        # Nästa chunk startar vid break_point (inte med överlapp bakåt, det skapar loopar)
+        # Överlappen hanteras genom att vi söker brytpunkt i slutet av varje chunk
+        new_start = break_point
+        if new_start <= start:
+            # Säkerhet: om vi inte gör framsteg, tvinga framåt
+            new_start = start + chunk_size // 2
+        start = new_start
+
+    return chunks
+
+
+def merge_extraction_results(results_list):
     """
-    # Begränsa längden för säkerhets skull (kan justeras upp vid behov)
-    limited_text = text[:8000]
+    Slå ihop resultat från flera chunk-extraheringar.
+    Deduplicerar personer, personnummer och telefonnummer.
+    """
+    all_persons = []
+    all_pnr = set()
+    all_phones = set()
+
+    for result in results_list:
+        all_persons.extend(result.get("persons", []))
+        all_pnr.update(result.get("personnummer", []) or [])
+        all_phones.update(result.get("phones", []) or [])
+
+    # Slå ihop personer med merge_persons
+    merged_persons = merge_persons(all_persons)
+
+    return {
+        "persons": merged_persons,
+        "personnummer": list(all_pnr),
+        "phones": list(all_phones),
+    }
+
+
+def call_ollama_extract_single(text, model=OLLAMA_MODEL):
+    """
+    Anropar Ollama för en enskild textbit.
+    Intern funktion som används av call_ollama_extract.
+    """
 
     prompt = f"""
 Du analyserar svensk löptext och extraherar personuppgifter (PII).
@@ -606,7 +656,7 @@ Viktiga regler:
 - Svara med välformad JSON som går att parsa direkt.
 
 Text:
-\"\"\"{limited_text}\"\"\"
+\"\"\"{text}\"\"\"
 
 
 Svara ENBART med giltig JSON på formen:
@@ -631,11 +681,22 @@ Inga kommentarer, ingen extra text, endast JSON.
             "model": model,
             "prompt": prompt,
             "stream": False,
+            "options": {
+                "num_ctx": 16384,  # Öka context window för längre dokument
+            },
         },
         timeout=900,
     )
     resp.raise_for_status()
     data = resp.json()
+
+    # Kontrollera om prompten trunkerades
+    prompt_tokens = data.get("prompt_eval_count", 0)
+    expected_tokens = len(prompt) // 3  # Grov uppskattning: ~3 tecken per token
+    if prompt_tokens > 0 and prompt_tokens < expected_tokens * 0.8:
+        print(f"⚠️  VARNING: Prompten kan ha trunkerats! "
+              f"Processade {prompt_tokens} tokens, förväntade ~{expected_tokens}")
+
     raw = data.get("response", "").strip()
 
     # Enkel städning om modellen skulle råka lägga till ```json ``` runt
@@ -697,6 +758,37 @@ Inga kommentarer, ingen extra text, endast JSON.
         "personnummer": personnummer,
         "phones": phones,
     }
+
+
+def call_ollama_extract(text, model=OLLAMA_MODEL):
+    """
+    Huvudfunktion för att extrahera PII från text.
+    Hanterar långa dokument genom att dela upp i chunks.
+    """
+    CHUNK_SIZE = 10000  # Tecken per chunk
+    OVERLAP = 500       # Överlapp mellan chunks
+
+    # Kolla om texten behöver delas upp
+    if len(text) <= CHUNK_SIZE:
+        # Kort text, processera direkt
+        return call_ollama_extract_single(text, model)
+
+    # Lång text, dela upp i chunks
+    chunks = split_text_into_chunks(text, CHUNK_SIZE, OVERLAP)
+    print(f"📄 Dokumentet delades upp i {len(chunks)} delar för analys...")
+
+    results = []
+    for i, chunk in enumerate(chunks, 1):
+        print(f"   Analyserar del {i}/{len(chunks)}...")
+        result = call_ollama_extract_single(chunk, model)
+        results.append(result)
+
+    # Slå ihop alla resultat
+    merged = merge_extraction_results(results)
+    print(f"   ✅ Analys klar: {len(merged['persons'])} personer, "
+          f"{len(merged['personnummer'])} personnummer, {len(merged['phones'])} telefonnummer")
+
+    return merged
 
 
 def regex_find_entities(text):
